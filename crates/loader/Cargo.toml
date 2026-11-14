@@ -1,0 +1,18 @@
+[package]
+name = "governor_loader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "governor_loader"
+path = "src/main.rs"
+# There is no std here, so there is no test harness either. Without these two
+# lines, `cargo test` and rust-analyzer's all-targets check try to build one.
+test = false
+bench = false
+
+[dependencies]
+# panic_handler: print the panic on the UEFI console, wait 10 s, then shut down.
+uefi = { workspace = true, features = ["panic_handler"] }

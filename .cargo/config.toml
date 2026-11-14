@@ -1,0 +1,9 @@
+# Every crate in the workspace builds for UEFI for now. When the
+# x86_64-unknown-none kernel crate arrives, each crate gets its own target
+# through the build tooling instead.
+[build]
+target = "x86_64-unknown-uefi"
+
+# `cargo run` hands the built .efi to this script, which boots it in QEMU.
+[target.x86_64-unknown-uefi]
+runner = "scripts/qemu-run.sh"

@@ -1,0 +1,22 @@
+# argus_governor: a bare-metal Rust edge node for the Intel Atom x7425E.
+#
+# Crates live under crates/. Today there is one:
+#   crates/loader   the UEFI application (x86_64-unknown-uefi), booted as BOOTX64.EFI
+# Planned:
+#   crates/kernel   the Embassy application (x86_64-unknown-none)
+#   crates/proto    types shared by the loader, the kernel and the host side
+
+[workspace]
+resolver = "3"
+members = ["crates/loader"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Exact versions. The uefi crate's API changes between 0.x releases, so moving
+# to a new one should be its own commit, not a side effect of `cargo update`.
+[workspace.dependencies]
+uefi = "=0.41.0"
