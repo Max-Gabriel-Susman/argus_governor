@@ -5,11 +5,13 @@
 //!
 //! - [`firmware::FirmwareSerial`]: the firmware's Serial I/O protocol. Only
 //!   valid while boot services are running.
-//! - Next: a 16550 UART driven directly through I/O ports (COM1 at 0x3F8),
-//!   and later the same UART behind memory-mapped registers if the board's
-//!   header turns out to be wired that way.
+//! - [`uart16550::Uart16550`]: a 16550 UART driven directly, with or without
+//!   boot services. Its registers come through a [`uart16550::Registers`]
+//!   implementation: I/O ports for COM1 at 0x3F8 now, memory-mapped later if
+//!   the board's header turns out to need it.
 
 pub mod firmware;
+pub mod uart16550;
 
 use core::fmt;
 

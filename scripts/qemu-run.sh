@@ -8,9 +8,13 @@
 #      loads from removable media when no boot entry says otherwise;
 #   2. makes a fresh, writable copy of the OVMF variable store;
 #   3. starts QEMU on q35 with OVMF (no Secure Boot), serial on this terminal,
-#      KVM when /dev/kvm is usable and TCG otherwise.
+#      KVM when /dev/kvm is usable and TCG otherwise;
+#   4. turns the loader's isa-debug-exit code into this script's exit status:
+#      0 for success, non-zero for anything else (table at the end).
 #
 # Firmware paths can be overridden: OVMF_CODE=... OVMF_VARS=... cargo run
+# A run still going after QEMU_TIMEOUT seconds (default 60) is stopped.
+# QEMU_TIMEOUT=0 waits forever, for poking around the firmware by hand.
 
 set -euo pipefail
 
@@ -90,4 +94,25 @@ qemu_args=(
     -device "isa-debug-exit,iobase=0xf4,iosize=0x04"
 )
 
-exec qemu-system-x86_64 "${qemu_args[@]}" "$@"
+# ---- Run and report ---------------------------------------------------------
+# The loader writes 0x10 (success) or 0x11 (panic) to isa-debug-exit, and QEMU
+# exits with (value << 1) | 1:
+#
+#   QEMU status  meaning                                  script status
+#   33           the loader reported success              0
+#   35           the loader panicked                      1
+#   0            the guest stopped without reporting:     2
+#                power-off, reset, or a triple fault
+#                (which -no-reboot turns into an exit)
+#   124          still running after QEMU_TIMEOUT         124
+timeout_s="${QEMU_TIMEOUT:-60}"
+status=0
+timeout --foreground "$timeout_s" qemu-system-x86_64 "${qemu_args[@]}" "$@" || status=$?
+
+case "$status" in
+    33) echo "qemu-run: PASS" >&2; exit 0 ;;
+    35) echo "qemu-run: FAIL, the loader panicked" >&2; exit 1 ;;
+    0) echo "qemu-run: FAIL, the guest stopped without reporting (power-off, reset or triple fault)" >&2; exit 2 ;;
+    124) echo "qemu-run: FAIL, no result after ${timeout_s} s (QEMU_TIMEOUT=0 waits forever)" >&2; exit 124 ;;
+    *) echo "qemu-run: FAIL, QEMU exited with status $status" >&2; exit "$status" ;;
+esac

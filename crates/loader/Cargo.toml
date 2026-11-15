@@ -14,5 +14,6 @@ test = false
 bench = false
 
 [dependencies]
-# panic_handler: print the panic on the UEFI console, wait 10 s, then shut down.
-uefi = { workspace = true, features = ["panic_handler"] }
+# No uefi features. src/panic.rs is the panic handler: the crate's own prints
+# through the firmware, which stops working after ExitBootServices.
+uefi = { workspace = true }
