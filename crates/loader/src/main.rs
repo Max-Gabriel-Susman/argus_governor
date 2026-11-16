@@ -4,10 +4,13 @@
 //! and once on the serial port (the Serial I/O protocol).
 //! Milestone 2: exit boot services, greet again by driving the COM1 UART
 //! directly, and end the QEMU run through isa-debug-exit.
+//! Milestone 3: hand COM1 to an Embassy task on a raw executor, which greets
+//! once more before the run ends.
 
 #![no_std]
 #![no_main]
 
+mod executor;
 mod panic;
 mod port;
 mod qemu;
@@ -15,6 +18,7 @@ mod serial;
 
 use core::arch::asm;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use uefi::prelude::*;
 use uefi::runtime::ResetType;
@@ -69,10 +73,27 @@ fn main() -> Status {
         "Hello from bare metal: boot services exited"
     );
 
-    // 5. Report success to the run script.
+    // 5. An Embassy task. COM1 moves into it, and the executor runs until the
+    //    task says it has printed. unwrap() fails only if the task's pool,
+    //    one slot by default, is already taken.
+    executor::run(
+        move |spawner| spawner.spawn(hello(com1).unwrap()),
+        || HELLO_DONE.load(Ordering::Acquire),
+    );
+
+    // 6. Report success to the run script.
     qemu::exit(ExitCode::Success);
 
     // Only reached without isa-debug-exit. Runtime services survive
     // ExitBootServices, so the firmware can still power the machine off.
     runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, None)
+}
+
+/// Set by `hello` once it has printed.
+static HELLO_DONE: AtomicBool = AtomicBool::new(false);
+
+#[embassy_executor::task]
+async fn hello(mut com1: Uart16550<PortIo>) {
+    let _ = writeln!(SerialWriter(&mut com1), "Hello from an Embassy task");
+    HELLO_DONE.store(true, Ordering::Release);
 }

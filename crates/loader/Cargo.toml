@@ -17,3 +17,5 @@ bench = false
 # No uefi features. src/panic.rs is the panic handler: the crate's own prints
 # through the firmware, which stops working after ExitBootServices.
 uefi = { workspace = true }
+embassy-executor = { workspace = true }
+static_cell = { workspace = true }

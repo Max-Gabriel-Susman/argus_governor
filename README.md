@@ -16,7 +16,9 @@ Development happens in QEMU first, on a q35 machine with OVMF firmware.
 | --- | --- | --- |
 | 1. UEFI hello | Greeting on the UEFI console and the serial port | Done |
 | 2. Off the firmware | Exit boot services, print through the 16550 UART directly, end QEMU through isa-debug-exit | Done |
-| 3. Embassy hello | One Embassy task on a raw executor, spin-polled | Next |
+| 3. Embassy hello | One Embassy task on a raw executor, spin-polled | Done |
+
+Next: the Embassy side moves into its own `x86_64-unknown-none` kernel crate, then a TSC-based `embassy-time` driver and virtio-net.
 
 ## Layout
 
@@ -30,6 +32,7 @@ argus_governor/
 │   └── loader/                 governor_loader, booted as BOOTX64.EFI
 │       └── src/
 │           ├── main.rs
+│           ├── executor.rs         raw Embassy executor: the __pender and the poll loop
 │           ├── panic.rs            panic handler: COM1 directly, then isa-debug-exit
 │           ├── port.rs             x86 I/O port access
 │           ├── qemu.rs             isa-debug-exit codes
@@ -69,10 +72,11 @@ BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x
 Hello, Atom! (UEFI)
 Hello, Atom! (UEFI)
 Hello from bare metal: boot services exited
+Hello from an Embassy task
 qemu-run: PASS
 ```
 
-The first greeting goes to the UEFI console (ConOut), which OVMF routes to COM1 through its terminal driver. The second goes through the firmware's Serial I/O protocol. The third is written after ExitBootServices, straight to the 16550's registers.
+The first greeting goes to the UEFI console (ConOut), which OVMF routes to COM1 through its terminal driver. The second goes through the firmware's Serial I/O protocol. The third is written after ExitBootServices, straight to the 16550's registers. The fourth comes from an Embassy task that owns COM1 from then on.
 
 ### Exit status
 
@@ -94,7 +98,13 @@ The loader ends the run by writing to QEMU's isa-debug-exit device at port `0xf4
 3. OVMF loads the PE image and calls its entry point with the image handle and the system table. The uefi crate's `#[entry]` stores both, and `main` runs with boot services (console, protocols, memory allocation) available.
 4. `main` greets through the firmware: once on the console, once through the Serial I/O protocol, which it closes again.
 5. `main` calls ExitBootServices. The firmware stops its drivers and timer, boot-services memory becomes free, and only runtime services (time, variables, reset) remain. The loader masks interrupts, since the IDT still points at firmware handlers.
-6. From here only code in this repo drives the hardware. The loader programs COM1's 16550 itself, prints, and writes the success code to isa-debug-exit.
+6. From here only code in this repo drives the hardware. The loader programs COM1's 16550 itself and prints.
+7. COM1 moves into an Embassy task, spawned on a raw executor. The executor calls our `__pender` when the task is ready, and a loop polls it until the task reports that it has printed. With no interrupts configured, the loop spins rather than halting.
+8. The loader writes the success code to isa-debug-exit.
+
+## Embassy without a platform
+
+`embassy-executor` 0.10 is built with no `platform-*` feature (the older releases' `arch-*`), so it brings no run loop of its own. `src/executor.rs` supplies the two pieces it needs: a function exported as `__pender`, which the executor calls whenever a task is spawned or woken, and a loop that calls `poll` after that. The pender only raises a flag, because `poll` must never run inside it. Task storage is static on stable Rust, so nothing here needs nightly or an allocator. The `&'static` executor comes from a `StaticCell`.
 
 ## QEMU settings
 
@@ -149,7 +159,10 @@ The panic message is printed just above it, as `panic: panicked at <file>:<line>
 The guest powered off, reset or triple-faulted before reaching isa-debug-exit. If the bare-metal greeting is missing, the crash happened between ExitBootServices and the UART. `cargo run -- -d cpu_reset -D qemu.log` writes the CPU state at each reset to `qemu.log`.
 
 **`qemu-run: FAIL, no result after 60 s`**
-The guest is stuck: in a loop, or in the firmware's boot manager or shell after a failed boot (see the next two entries). Run with `QEMU_TIMEOUT=0` to keep it alive and look around.
+The guest is stuck: in a loop, or in the firmware's boot manager or shell after a failed boot (see the next two entries). If the last line is the bare-metal greeting, the Embassy task never ran: check that the pender raises the flag the run loop waits for. Run with `QEMU_TIMEOUT=0` to keep it alive and look around.
+
+**`rust-lld: error: undefined symbol: __pender`**
+The executor calls a function named `__pender` that the program has to export. It lives in `src/executor.rs`, so check that `main.rs` has `mod executor;` and that the function keeps its `#[unsafe(export_name = "__pender")]` attribute.
 
 **`BdsDxe: failed to load Boot0001 ... Not Found`, then a `Shell>` prompt**
 The loader isn't at `EFI/BOOT/BOOTX64.EFI` on the drive. Run `QEMU_TIMEOUT=0 cargo run`, then at the shell type `fs0:` and `ls EFI\BOOT` to see what is there. Ctrl-C quits QEMU.
